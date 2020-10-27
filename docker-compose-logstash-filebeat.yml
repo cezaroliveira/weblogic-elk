@@ -1,0 +1,93 @@
+version: '3'
+
+services:
+
+  logstash:
+    image: docker.elastic.co/logstash/logstash:${ELK_VERSION}
+    container_name: logstash-container
+    volumes:
+      ### Config
+      # - type: bind
+      #   source: ./logstash/config/logstash.yml
+      #   target: /usr/share/logstash/config/logstash.yml
+      #   read_only: true
+      ### Pipelines
+      # File input
+      # - type: bind
+      #   source: ./logstash/pipeline/logstash-file-sample.conf
+      #   target: /usr/share/logstash/pipeline/logstash-file-sample.conf
+      #   read_only: true
+      # Filebeat input
+      - type: bind
+        source: ./logstash/pipeline/logstash-weblogic.conf
+        target: /usr/share/logstash/pipeline/logstash-weblogic.conf
+        read_only: true
+      ### Patterns used by Logstash pipelines
+      - type: bind
+        source: ./logstash/pipeline/patterns
+        target: /usr/share/logstash/patterns
+        read_only: true
+      ### Logs (used by File input)
+      - type: bind
+        source: ./fakelogs
+        target: /fakelogs
+        read_only: true
+      # ### Data
+      # - type: bind
+      #   source: ./logstash/data
+      #   target: /var/lib/logstash/data
+      ### Templates
+      # - type: bind
+      #   source: ./logstash/template
+      #   target: /var/lib/logstash/template
+    ports:
+      - "5000:5000/tcp"
+      - "5000:5000/udp"
+      - "8003:8003"
+      - "9600:9600"
+    environment:
+      LS_JAVA_OPTS: "-Xms256m -Xmx256m"
+    # Automatically reload pipeline files when changed
+    command: --config.reload.automatic
+    networks:
+      - default
+
+  filebeat:
+    container_name: filebeat-container
+    user: root
+    image: "docker.elastic.co/beats/filebeat:${ELK_VERSION}"
+    volumes:
+      # Mount the filebeat configuration so users can make edit
+      - .\filebeat\config\weblogic-filebeat.yml:/usr/share/filebeat/filebeat.yml
+      # Named volume fsdata. This is used to persist the registry file between restarts, so to avoid data duplication
+      # - fbdata:/usr/share/filebeat/data/
+      ### Logs (used by Filebeat)
+      - type: bind
+        source: .\fakelogs
+        target: /fakelogs
+        read_only: true
+    networks: 
+      - default
+    # command: filebeat -e -E output.elasticsearch.username=elastic -E output.elasticsearch.password=${ES_PASSWORD} -strict.perms=false
+    # command: filebeat -e -E output.elasticsearch.username=elastic -strict.perms=false
+    # restart: on-failure
+    depends_on:
+      - logstash
+    #   # Wait for the these services to come up. This ensures the logs are available and ES exists for indexing
+    #   elasticsearch:  { condition: service_healthy }
+
+# volumes:
+#   fbdata:
+#     driver: local
+
+networks:
+  # Using an external user-defined network, already created before
+  # "default" => visible internally only, used by internals containers that don't see the external network
+  # "weblogic-network" => visible by others containers created externally to this
+  default:
+    external:
+      name: weblogic-network
+  # Using a default network dynamically created by docker, used by internals containers only
+  # Pattern => dirName_weblogic-network
+  # weblogic-network:
+  #   driver: bridge
